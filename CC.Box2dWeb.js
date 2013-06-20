@@ -91,6 +91,7 @@
         CC.bind("enterframe", function(){
             el.x = (el.body.GetPosition().x * b2.scale) - (el.w/2); //position of Box2D is at center
             el.y = (el.body.GetPosition().y * b2.scale) - (el.h/2);
+            el.angle = el.body.GetAngle() / Math.PI * 180.0;
         });
 
         init();
