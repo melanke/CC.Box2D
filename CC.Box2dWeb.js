@@ -23,6 +23,7 @@
         PolygonShape : b2.Collision.Shapes.b2PolygonShape,
         CircleShape : b2.Collision.Shapes.b2CircleShape,
         Body: b2.Dynamics.b2Body,
+        ContactListener: b2.Dynamics.b2ContactListener,
 
         scale: 30
     });
@@ -53,6 +54,29 @@
             world.DrawDebugData();
         }
     });
+
+    var globalContactListener = new b2.ContactListener();
+
+    globalContactListener.BeginContact = function(contact){
+        CC.trigger("b2BeginContact", contact);
+    };
+
+    globalContactListener.EndContact = function(contact){
+        CC.trigger("b2EndContact", contact);
+    };
+
+    globalContactListener.PreSolve = function(contact, oldManifold){
+        CC.trigger("b2PreSolveContact", contact, oldManifold);
+    };
+
+    globalContactListener.PostSolve = function(contact, impulse){
+        CC.trigger("b2PostSolveContact", contact, impulse);
+    };
+
+    world.SetContactListener(globalContactListener);
+
+
+
 
     CC.def("b2Body", function(opts){
 
@@ -94,9 +118,105 @@
             return this;
         };
 
+        this.applyImpulse = function(x, y){
+            this.body.ApplyImpulse(new b2.Vec2(x, y), this.body.GetWorldCenter());
+
+            return this;
+        };
+
+        this.setLinearVelocity = function(x, y){
+            this.body.SetLinearVelocity(new b2.Vec2(x, y));
+        };
+
         this.applyForceWithAngle = function(x, y){
             var p = CC.rotatePoint([x, y], this.body.GetWorldCenter(), this.angle);
             this.applyForce(p.x, p.y);
+        };
+
+        this.applyImpulseWithAngle = function(x, y){
+            var p = CC.rotatePoint([x, y], this.body.GetWorldCenter(), this.angle);
+            this.applyImpulse(p.x, p.y);
+        };
+
+        this.setLinearVelocityWithAngle = function(x, y){
+            var p = CC.rotatePoint([x, y], this.body.GetWorldCenter(), this.angle);
+            this.setLinearVelocity(p.x, p.y);
+        };
+
+        this.checkContact = function(selectOther){
+            var contact = this.body.GetContactList();
+
+            if (!contact) {
+                return null;
+            }
+
+            var els = CC(selectOther);
+
+            do {
+                var bodyB = contact.other;
+
+                if (!els.asArray) {
+
+                    if (otherElement.body === bodyB) {
+                        return {
+                            subject: this,
+                            collidesWith: [otherElement]
+                        };
+                    }
+
+                } else {
+                    var collidesWith = [];
+                    var otherElementAsArray = els.asArray();
+                    for (var i in otherElementAsArray) {
+                        var otherBody = otherElementAsArray[i].body;
+                        if (otherBody === bodyB) {
+                            collidesWith.push(otherElementAsArray[i]);
+                        }
+                    }
+
+                    if (collidesWith.length) {
+                        return {
+                            subject: this,
+                            collidesWith: collidesWith
+                        };
+                    }
+                }
+
+                contact = contact.next;
+            } while (contact);
+
+            return null;
+        };
+
+        this.onBeginContact = function(selectOther, action) {
+            var isInContact = false;
+
+            CC.bind("enterframe", function(){
+                var contacts = el.checkContact(selectOther);
+                if (contacts) {
+                    if (!isInContact) {
+                        action.call(el, contacts);
+                        isInContact = true;
+                    }
+                } else {
+                    isInContact = false;
+                }
+            });
+        };
+
+        this.onEndContact = function(selectOther, action) {
+            var isInContact = false;
+
+            CC.bind("enterframe", function(){
+                if (!el.checkContact(selectOther)) {
+                    if (isInContact) {
+                        action.call(el);
+                        isInContact = false;
+                    }
+                } else {
+                    isInContact = true;
+                }
+            });
         };
 
         this.bind("remove", function(){
@@ -125,9 +245,11 @@
         };
 
         CC.bind("enterframe", function(){
-            el.x = (el.body.GetPosition().x * b2.scale) - (el.w/2); //position of Box2D is at center
-            el.y = (el.body.GetPosition().y * b2.scale) - (el.h/2);
+            el.x = el.body.GetPosition().x * b2.scale - (el.w/2); //position of Box2D is at center
+            el.y = el.body.GetPosition().y * b2.scale - (el.h/2);
             el.angle = el.body.GetAngle() / Math.PI * 180.0;
+            el.speed = el.body.GetLinearVelocity();
+            el.angledSpeed = CC.rotatePoint([el.speed.x, el.speed.y], el.body.GetWorldCenter(), -el.angle);
         });
 
         init();
@@ -151,9 +273,11 @@
         };
 
         CC.bind("enterframe", function(){
-            el.x = (el.body.GetPosition().x * b2.scale) - (el.w/2); //position of Box2D is at center
-            el.y = (el.body.GetPosition().y * b2.scale) - (el.h/2);
+            el.x = el.body.GetPosition().x * b2.scale - (el.w/2); //position of Box2D is at center
+            el.y = el.body.GetPosition().y * b2.scale - (el.h/2);
             el.angle = el.body.GetAngle() / Math.PI * 180.0;
+            el.speed = el.body.GetLinearVelocity();
+            el.angledSpeed = CC.rotatePoint([el.speed.x, el.speed.y], el.body.GetWorldCenter(), -el.angle);
         });
 
         init();
@@ -206,6 +330,7 @@
                 el.fixture = null;
             } else {
 
+                el.fixDef.shape = new b2.PolygonShape();
                 el.fixDef.shape.SetAsArray(shapeArray);
                 el.fixture = el.body.CreateFixture(el.fixDef);
             }
@@ -220,6 +345,8 @@
             el.x = el.body.GetPosition().x * b2.scale;
             el.y = el.body.GetPosition().y * b2.scale;
             el.angle = el.body.GetAngle() / Math.PI * 180.0;
+            el.speed = el.body.GetLinearVelocity();
+            el.angledSpeed = CC.rotatePoint([el.speed.x, el.speed.y], el.body.GetWorldCenter(), -el.angle);
         });
 
         init();
@@ -261,68 +388,68 @@
         */
 
         var clockWise = function(p) {
-          var i, j, k, z,
-              count = 0,
-              n = p.length;
+            var i, j, k, z,
+                count = 0,
+                n = p.length;
 
-          if (n < 3) {
-            return (0);
-          }
-
-          for (i = 0; i < n; i++) {
-            j = (i + 1) % n;
-            k = (i + 2) % n;
-            z  = (p[j].x - p[i].x) * (p[k].y - p[j].y);
-            z -= (p[j].y - p[i].y) * (p[k].x - p[j].x);
-
-            if (z < 0) {
-              count--;
-            } else if (z > 0) {
-              count++;
+            if (n < 3) {
+                return (0);
             }
-          }
 
-          if (count > 0) {
-            return (COUNTERCLOCKWISE);
-          } else if (count < 0) {
-            return (CLOCKWISE);
-          } else {
-            return (0);
-          }
-        }
+            for (i = 0; i < n; i++) {
+                j = (i + 1) % n;
+                k = (i + 2) % n;
+                z  = (p[j].x - p[i].x) * (p[k].y - p[j].y);
+                z -= (p[j].y - p[i].y) * (p[k].x - p[j].x);
+
+                if (z < 0) {
+                    count--;
+                } else if (z > 0) {
+                    count++;
+                }
+            }
+
+            if (count > 0) {
+                return (COUNTERCLOCKWISE);
+            } else if (count < 0) {
+                return (CLOCKWISE);
+            } else {
+                return (0);
+            }
+        };
 
         var convex = function(p) {
-          var i, j, k, z,
-              flag = 0,
-              n = p.length;
+            var i, j, k, z,
+            flag = 0,
+            n = p.length;
 
-          if (n < 3) {
-            return (0);
-          }
-
-          for (i = 0; i < n; i++) {
-            j = (i + 1) % n;
-            k = (i + 2) % n;
-            z  = (p[j].x - p[i].x) * (p[k].y - p[j].y);
-            z -= (p[j].y - p[i].y) * (p[k].x - p[j].x);
-
-            if (z < 0) {
-              flag |= 1;
-            } else if (z > 0) {
-              flag |= 2;
+            if (n < 3) {
+                return (0);
             }
 
-            if (flag === 3) {
-              return (CONCAVE);
-            }
-          }
+            for (i = 0; i < n; i++) {
+                j = (i + 1) % n;
+                k = (i + 2) % n;
+                z  = (p[j].x - p[i].x) * (p[k].y - p[j].y);
+                z -= (p[j].y - p[i].y) * (p[k].x - p[j].x);
 
-          if (flag !== 0) {
-            return (CONVEX);
-          } else {
-            return (0);
-          }
-        }
+                if (z < 0) {
+                    flag |= 1;
+                } else if (z > 0) {
+                    flag |= 2;
+                }
+
+                if (flag === 3) {
+                    return (CONCAVE);
+                }
+            }
+
+            if (flag !== 0) {
+                return (CONVEX);
+            } else {
+                return (0);
+            }
+        };
 
 
 
@@ -340,157 +467,157 @@
         var EPSILON = 0.0000000001;
 
         var process = function(contour) {
-          var result = [],
-              n = contour.length,
-              verts = [],
-              v,
-              nv = n,
-              m,
-              count = 2 * nv;  /* error detection */
+            var result = [],
+            n = contour.length,
+            verts = [],
+            v,
+            nv = n,
+            m,
+            count = 2 * nv;  /* error detection */
 
-          if (n < 3) {
-            return null;
-          }
-
-          /* we want a counter-clockwise polygon in verts */
-
-          if (0.0 < area(contour)) {
-            for (v = 0; v < n; v++) {
-              verts[v] = v;
-            }
-          } else {
-            for (v = 0; v < n; v++) {
-              verts[v] = (n - 1) - v;
-            }
-          }
-
-          /*  remove nv-2 vertsertices, creating 1 triangle every time */
-          for (m = 0, v = nv - 1; nv > 2;) {
-            /* if we loop, it is probably a non-simple polygon */
-            if (0 >= (count--)) {
-              //** Triangulate: ERROR - probable bad polygon!
-              // console.log("bad poly");
-              return null;
+            if (n < 3) {
+                return null;
             }
 
-            /* three consecutive vertices in current polygon, <u,v,w> */
-            var u = v;
-            if (nv <= u) {
-              u = 0; /* previous */
+            /* we want a counter-clockwise polygon in verts */
+
+            if (0.0 < area(contour)) {
+                for (v = 0; v < n; v++) {
+                    verts[v] = v;
+                }
+            } else {
+                for (v = 0; v < n; v++) {
+                    verts[v] = (n - 1) - v;
+                }
             }
 
-            v = u + 1;
-            if (nv <= v) {
-              v = 0; /* new v */
+            /*  remove nv-2 vertsertices, creating 1 triangle every time */
+            for (m = 0, v = nv - 1; nv > 2;) {
+                /* if we loop, it is probably a non-simple polygon */
+                if (0 >= (count--)) {
+                    //** Triangulate: ERROR - probable bad polygon!
+                    // console.log("bad poly");
+                    return null;
+                }
+
+                /* three consecutive vertices in current polygon, <u,v,w> */
+                var u = v;
+                if (nv <= u) {
+                    u = 0; /* previous */
+                }
+
+                v = u + 1;
+                if (nv <= v) {
+                    v = 0; /* new v */
+                }
+
+                var w = v + 1;
+                if (nv <= w) {
+                    w = 0; /* next */
+                }
+
+                if (snip(contour, u, v, w, nv, verts)) {
+                    var a, b, c, s, t;
+
+                    /* true names of the vertices */
+                    a = verts[u];
+                    b = verts[v];
+                    c = verts[w];
+
+                    /* output Triangle */
+                    result.push(contour[a]);
+                    result.push(contour[b]);
+                    result.push(contour[c]);
+
+                    m++;
+
+                    /* remove v from remaining polygon */
+                    for (s = v, t = v + 1; t < nv; s++, t++) {
+                        verts[s] = verts[t];
+                    }
+
+                    nv--;
+
+                    /* resest error detection counter */
+                    count = 2 * nv;
+                }
             }
 
-            var w = v + 1;
-            if (nv <= w) {
-              w = 0; /* next */
-            }
-
-            if (snip(contour, u, v, w, nv, verts)) {
-              var a, b, c, s, t;
-
-              /* true names of the vertices */
-              a = verts[u];
-              b = verts[v];
-              c = verts[w];
-
-              /* output Triangle */
-              result.push(contour[a]);
-              result.push(contour[b]);
-              result.push(contour[c]);
-
-              m++;
-
-              /* remove v from remaining polygon */
-              for (s = v, t = v + 1; t < nv; s++, t++) {
-                verts[s] = verts[t];
-              }
-
-              nv--;
-
-              /* resest error detection counter */
-              count = 2 * nv;
-            }
-          }
-
-          return result;
-        }
+            return result;
+        };
 
         // calculate area of the contour polygon
         var area = function(contour) {
-          var n = contour.length,
-              a = 0.0;
+            var n = contour.length,
+            a = 0.0;
 
-          for (var p = n - 1, q = 0; q < n; p = q++) {
-            a += contour[p].x * contour[q].y - contour[q].x * contour[p].y;
-          }
+            for (var p = n - 1, q = 0; q < n; p = q++) {
+                a += contour[p].x * contour[q].y - contour[q].x * contour[p].y;
+            }
 
-          return a * 0.5;
-        }
+            return a * 0.5;
+        };
 
         // see if p is inside triangle abc
         var insideTriangle = function(ax, ay, bx, by, cx, cy, px, py) {
-          var aX, aY, bX, bY,
-              cX, cY, apx, apy,
-              bpx, bpy, cpx, cpy,
-              cCROSSap, bCROSScp, aCROSSbp;
+            var aX, aY, bX, bY,
+            cX, cY, apx, apy,
+            bpx, bpy, cpx, cpy,
+            cCROSSap, bCROSScp, aCROSSbp;
 
-          aX = cx - bx;
-          aY = cy - by;
-          bX = ax - cx;
-          bY = ay - cy;
-          cX = bx - ax;
-          cY = by - ay;
-          apx = px - ax;
-          apy = py - ay;
-          bpx = px - bx;
-          bpy = py - by;
-          cpx = px - cx;
-          cpy = py - cy;
+            aX = cx - bx;
+            aY = cy - by;
+            bX = ax - cx;
+            bY = ay - cy;
+            cX = bx - ax;
+            cY = by - ay;
+            apx = px - ax;
+            apy = py - ay;
+            bpx = px - bx;
+            bpy = py - by;
+            cpx = px - cx;
+            cpy = py - cy;
 
-          aCROSSbp = aX * bpy - aY * bpx;
-          cCROSSap = cX * apy - cY * apx;
-          bCROSScp = bX * cpy - bY * cpx;
+            aCROSSbp = aX * bpy - aY * bpx;
+            cCROSSap = cX * apy - cY * apx;
+            bCROSScp = bX * cpy - bY * cpx;
 
-          return ((aCROSSbp >= 0.0) && (bCROSScp >= 0.0) && (cCROSSap >= 0.0));
-        }
+            return ((aCROSSbp >= 0.0) && (bCROSScp >= 0.0) && (cCROSSap >= 0.0));
+        };
 
         var snip = function(contour, u, v, w, n, verts) {
-          var p,
-              ax, ay, bx, by,
-              cx, cy, px, py;
+            var p,
+            ax, ay, bx, by,
+            cx, cy, px, py;
 
-          ax = contour[verts[u]].x;
-          ay = contour[verts[u]].y;
+            ax = contour[verts[u]].x;
+            ay = contour[verts[u]].y;
 
-          bx = contour[verts[v]].x;
-          by = contour[verts[v]].y;
+            bx = contour[verts[v]].x;
+            by = contour[verts[v]].y;
 
-          cx = contour[verts[w]].x;
-          cy = contour[verts[w]].y;
+            cx = contour[verts[w]].x;
+            cy = contour[verts[w]].y;
 
-          if (EPSILON > (((bx - ax) * (cy - ay)) - ((by - ay) * (cx - ax)))) {
-            return false;
-          }
-
-          for (p = 0; p < n; p++) {
-            if ((p == u) || (p == v) || (p == w)) {
-              continue;
+            if (EPSILON > (((bx - ax) * (cy - ay)) - ((by - ay) * (cx - ax)))) {
+                return false;
             }
 
-            px = contour[verts[p]].x
-            py = contour[verts[p]].y
+            for (p = 0; p < n; p++) {
+                if ((p == u) || (p == v) || (p == w)) {
+                    continue;
+                }
 
-            if (insideTriangle(ax, ay, bx, by, cx, cy, px, py)) {
-              return false;
+                px = contour[verts[p]].x
+                py = contour[verts[p]].y
+
+                if (insideTriangle(ax, ay, bx, by, cx, cy, px, py)) {
+                    return false;
+                }
             }
-          }
 
-          return true;
-        }
+            return true;
+        };
 
         return {
             clockWise: clockWise,
